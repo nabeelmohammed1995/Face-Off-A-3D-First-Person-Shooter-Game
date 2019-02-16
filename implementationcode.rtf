@@ -1,0 +1,546 @@
+{\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang16393{\fonttbl{\f0\fnil\fcharset0 Calibri;}{\f1\fswiss\fcharset0 Courier New;}}
+{\*\generator Riched20 6.3.9600}\viewkind4\uc1 
+\pard\sa200\sl276\slmult1\ul\b\f0\fs22\lang9 Playsetup.cs:-\par
+
+\pard\tx959\tx1918\tx2877\tx3836\tx4795\tx5754\tx6713\tx7672\tx8631\ulnone\b0\f1\fs20\lang16393 //-------------------------------------\par
+// Responsible for setting up the player.\par
+// This includes adding/removing him correctly on the network.\par
+//-------------------------------------\par
+\par
+using UnityEngine;\par
+using UnityEngine.Networking;\par
+\par
+[RequireComponent(typeof(Player))]\par
+[RequireComponent(typeof(PlayerController))]\par
+public class PlayerSetup : NetworkBehaviour \{\par
+\par
+\tab [SerializeField]\par
+\tab Behaviour[] componentsToDisable;\par
+\par
+\tab [SerializeField]\par
+\tab string remoteLayerName = "RemotePlayer";\par
+\par
+\tab [SerializeField]\par
+\tab string dontDrawLayerName = "DontDraw";\par
+\tab [SerializeField]\par
+\tab GameObject playerGraphics;\par
+\par
+\tab [SerializeField]\par
+\tab GameObject playerUIPrefab;\par
+\tab private GameObject playerUIInstance;\par
+\par
+\tab Camera sceneCamera;\par
+\par
+\tab void Start ()\par
+\tab\{\par
+\tab\tab // Disable components that should only be\par
+\tab\tab // active on the player that we control\par
+\tab\tab if (!isLocalPlayer)\par
+\tab\tab\{\par
+\tab\tab\tab DisableComponents();\par
+\tab\tab\tab AssignRemoteLayer();\par
+\tab\tab\}\par
+\tab\tab else\par
+\tab\tab\{\par
+\tab\tab\tab // We are the local player: Disable the scene camera\par
+\tab\tab\tab sceneCamera = Camera.main;\par
+\tab\tab\tab if (sceneCamera != null)\par
+\tab\tab\tab\{\par
+\tab\tab\tab\tab sceneCamera.gameObject.SetActive(false);\par
+            \}\par
+\par
+\tab\tab\tab // Disable player graphics for local player\par
+\tab\tab\tab SetLayerRecursively(playerGraphics, LayerMask.NameToLayer(dontDrawLayerName));\par
+\par
+\tab\tab\tab // Create PlayerUI\par
+\tab\tab\tab playerUIInstance = Instantiate(playerUIPrefab);\par
+\tab\tab\tab playerUIInstance.name = playerUIPrefab.name;\par
+\par
+\tab\tab\tab // Configure PlayerUI\par
+\tab\tab\tab PlayerUI ui = playerUIInstance.GetComponent<PlayerUI>();\par
+\tab\tab\tab if (ui == null)\par
+\tab\tab\tab\tab Debug.LogError("No PlayerUI component on PlayerUI prefab.");\par
+\tab\tab\tab ui.SetController(GetComponent<PlayerController>());\par
+\par
+\tab\tab\}\par
+\par
+\tab\tab GetComponent<Player>().Setup();\par
+\tab\}\par
+\par
+\tab void SetLayerRecursively (GameObject obj, int newLayer)\par
+\tab\{\par
+\tab\tab obj.layer = newLayer;\par
+\par
+\tab\tab foreach (Transform child in obj.transform)\par
+\tab\tab\{\par
+\tab\tab\tab SetLayerRecursively(child.gameObject, newLayer);\par
+\tab\tab\}\par
+\tab\}\par
+\par
+    public override void OnStartClient()\par
+    \{\par
+        base.OnStartClient();\par
+\par
+        string _netID = GetComponent<NetworkIdentity>().netId.ToString();\par
+        Player _player = GetComponent<Player>();\par
+\par
+        GameManager.RegisterPlayer(_netID, _player);\par
+    \}\par
+\par
+    void AssignRemoteLayer ()\par
+\tab\{\par
+\tab\tab gameObject.layer = LayerMask.NameToLayer(remoteLayerName);\par
+\tab\}\par
+\par
+\tab void DisableComponents ()\par
+\tab\{\par
+\tab\tab for (int i = 0; i < componentsToDisable.Length; i++)\par
+\tab\tab\{\par
+\tab\tab\tab componentsToDisable[i].enabled = false;\par
+\tab\tab\}\par
+\tab\}\par
+\par
+\tab // When we are destroyed\par
+\tab void OnDisable ()\par
+\tab\{\par
+\tab\tab Destroy(playerUIInstance);\par
+\par
+\tab\tab // Re-enable the scene camera\par
+\tab\tab if (sceneCamera != null)\par
+\tab\tab\{\par
+\tab\tab\tab sceneCamera.gameObject.SetActive(true);\par
+\tab\tab\}\par
+\tab\tab\par
+        GameManager.UnRegisterPlayer(transform.name);\par
+\tab\}\par
+\par
+\}\par
+
+\pard\sa200\sl276\slmult1\ul\b\f0\fs22\lang9  \par
+Player.cs:-\par
+
+\pard\tx959\tx1918\tx2877\tx3836\tx4795\tx5754\tx6713\tx7672\tx8631\ulnone\b0\f1\fs20\lang16393 using UnityEngine;\par
+using UnityEngine.Networking;\par
+using System.Collections;\par
+\par
+public class Player : NetworkBehaviour \{\par
+\par
+\tab [SyncVar]\par
+\tab private bool _isDead = false;\par
+\tab public bool isDead\par
+\tab\{\par
+\tab\tab get \{ return _isDead; \}\par
+\tab\tab protected set \{ _isDead = value; \}\par
+\tab\}\par
+\par
+    [SerializeField]\par
+    private int maxHealth = 100;\par
+\par
+    [SyncVar]\par
+    private int currentHealth;\par
+\par
+\tab [SerializeField]\par
+\tab private Behaviour[] disableOnDeath;\par
+\tab private bool[] wasEnabled;\par
+\par
+    public void Setup ()\par
+    \{\par
+\tab\tab wasEnabled = new bool[disableOnDeath.Length];\par
+\tab\tab for (int i = 0; i < wasEnabled.Length; i++)\par
+\tab\tab\{\par
+\tab\tab\tab wasEnabled[i] = disableOnDeath[i].enabled;\par
+\tab\tab\}\par
+\par
+        SetDefaults();\par
+    \}\par
+\par
+\tab //void Update ()\par
+\tab //\{\par
+\tab //\tab if (!isLocalPlayer)\par
+\tab //\tab\tab return;\par
+\par
+\tab //\tab if (Input.GetKeyDown(KeyCode.K))\par
+\tab //\tab\{\par
+\tab //\tab\tab RpcTakeDamage(99999);\par
+\tab //\tab\}\par
+\tab //\}\par
+\par
+\tab [ClientRpc]\par
+    public void RpcTakeDamage (int _amount)\par
+    \{\par
+\tab\tab if (isDead)\par
+\tab\tab\tab return;\par
+\par
+        currentHealth -= _amount;\par
+\par
+        Debug.Log(transform.name + " now has " + currentHealth + " health.");\par
+\par
+\tab\tab if (currentHealth <= 0)\par
+\tab\tab\{\par
+\tab\tab\tab Die();\par
+\tab\tab\}\par
+    \}\par
+\par
+\tab private void Die()\par
+\tab\{\par
+\tab\tab isDead = true;\par
+\par
+\tab\tab for (int i = 0; i < disableOnDeath.Length; i++)\par
+\tab\tab\{\par
+\tab\tab\tab disableOnDeath[i].enabled = false;\par
+\tab\tab\}\par
+\par
+\tab\tab Collider _col = GetComponent<Collider>();\par
+\tab\tab if (_col != null)\par
+\tab\tab\tab _col.enabled = false;\par
+\par
+\tab\tab Debug.Log(transform.name + " is DEAD!");\par
+\par
+\tab\tab StartCoroutine(Respawn());\par
+\tab\}\par
+\par
+\tab private IEnumerator Respawn ()\par
+\tab\{\par
+\tab\tab yield return new WaitForSeconds(GameManager.instance.matchSettings.respawnTime);\par
+\par
+\tab\tab SetDefaults();\par
+\tab\tab Transform _spawnPoint = NetworkManager.singleton.GetStartPosition();\par
+\tab\tab transform.position = _spawnPoint.position;\par
+\tab\tab transform.rotation = _spawnPoint.rotation;\par
+\par
+\tab\tab Debug.Log(transform.name + " respawned.");\par
+\tab\}\par
+\par
+    public void SetDefaults ()\par
+    \{\par
+\tab\tab isDead = false;\par
+\par
+        currentHealth = maxHealth;\par
+\par
+\tab\tab for (int i = 0; i < disableOnDeath.Length; i++)\par
+\tab\tab\{\par
+\tab\tab\tab disableOnDeath[i].enabled = wasEnabled[i];\par
+\tab\tab\}\par
+\par
+\tab\tab Collider _col = GetComponent<Collider>();\par
+\tab\tab if (_col != null)\par
+\tab\tab\tab _col.enabled = true;\par
+    \}\par
+\par
+\}\par
+
+\pard\sa200\sl276\slmult1\f0\fs22\lang9\par
+\ul\b Playercontroller.cs:-\par
+
+\pard\tx959\tx1918\tx2877\tx3836\tx4795\tx5754\tx6713\tx7672\tx8631\ulnone\b0\f1\fs20\lang16393 using UnityEngine;\par
+\par
+[RequireComponent(typeof(Animator))]\par
+[RequireComponent(typeof(ConfigurableJoint))]\par
+[RequireComponent(typeof(PlayerMotor))]\par
+public class PlayerController : MonoBehaviour \{\par
+\par
+\tab [SerializeField]\par
+\tab private float speed = 5f;\par
+\tab [SerializeField]\par
+\tab private float lookSensitivity = 3f;\par
+\par
+\tab [SerializeField]\par
+\tab private float thrusterForce = 1000f;\par
+\par
+\tab [SerializeField]\par
+\tab private float thrusterFuelBurnSpeed = 1f;\par
+\tab [SerializeField]\par
+\tab private float thrusterFuelRegenSpeed = 0.3f;\par
+\tab private float thrusterFuelAmount = 1f;\par
+\par
+\tab public float GetThrusterFuelAmount ()\par
+\tab\{\par
+\tab\tab return thrusterFuelAmount;\par
+\tab\}\par
+\par
+\tab [SerializeField]\par
+\tab private LayerMask environmentMask;\par
+\par
+\tab [Header("Spring settings:")]\par
+\tab [SerializeField]\par
+\tab private float jointSpring = 20f;\par
+\tab [SerializeField]\par
+\tab private float jointMaxForce = 40f;\par
+\par
+\tab // Component caching\par
+\tab private PlayerMotor motor;\par
+\tab private ConfigurableJoint joint;\par
+\tab private Animator animator;\par
+\par
+\tab void Start ()\par
+\tab\{\par
+\tab\tab motor = GetComponent<PlayerMotor>();\par
+\tab\tab joint = GetComponent<ConfigurableJoint>();\par
+\tab\tab animator = GetComponent<Animator>();\par
+\par
+\tab\tab SetJointSettings(jointSpring);\par
+\tab\}\par
+\par
+\tab void Update ()\par
+\tab\{\par
+\tab\tab //Setting target position for spring\par
+\tab\tab //This makes the physics act right when it comes to\par
+\tab\tab //applying gravity when flying over objects\par
+\tab\tab RaycastHit _hit;\par
+\tab\tab if (Physics.Raycast (transform.position, Vector3.down, out _hit, 100f, environmentMask))\par
+\tab\tab\{\par
+\tab\tab\tab joint.targetPosition = new Vector3(0f, -_hit.point.y, 0f);\par
+\tab\tab\} else\par
+\tab\tab\{\par
+\tab\tab\tab joint.targetPosition = new Vector3(0f, 0f, 0f);\par
+\tab\tab\}\par
+\par
+\tab\tab //Calculate movement velocity as a 3D vector\par
+\tab\tab float _xMov = Input.GetAxis("Horizontal");\par
+\tab\tab float _zMov = Input.GetAxis("Vertical");\par
+\par
+\tab\tab Vector3 _movHorizontal = transform.right * _xMov;\par
+\tab\tab Vector3 _movVertical = transform.forward * _zMov;\par
+\par
+\tab\tab // Final movement vector\par
+\tab\tab Vector3 _velocity = (_movHorizontal + _movVertical) * speed;\par
+\par
+\tab\tab // Animate movement\par
+\tab\tab animator.SetFloat("ForwardVelocity", _zMov);\par
+\par
+\tab\tab //Apply movement\par
+\tab\tab motor.Move(_velocity);\par
+\par
+\tab\tab //Calculate rotation as a 3D vector (turning around)\par
+\tab\tab float _yRot = Input.GetAxisRaw("Mouse X");\par
+\par
+\tab\tab Vector3 _rotation = new Vector3(0f, _yRot, 0f) * lookSensitivity;\par
+\par
+\tab\tab //Apply rotation\par
+\tab\tab motor.Rotate(_rotation);\par
+\par
+\tab\tab //Calculate camera rotation as a 3D vector (turning around)\par
+\tab\tab float _xRot = Input.GetAxisRaw("Mouse Y");\par
+\par
+\tab\tab float _cameraRotationX = _xRot * lookSensitivity;\par
+\par
+\tab\tab //Apply camera rotation\par
+\tab\tab motor.RotateCamera(_cameraRotationX);\par
+\par
+\tab\tab // Calculate the thrusterforce based on player input\par
+\tab\tab Vector3 _thrusterForce = Vector3.zero;\par
+\tab\tab if (Input.GetButton ("Jump") && thrusterFuelAmount > 0f)\par
+\tab\tab\{\par
+\tab\tab\tab thrusterFuelAmount -= thrusterFuelBurnSpeed * Time.deltaTime;\par
+\par
+\tab\tab\tab if (thrusterFuelAmount >= 0.01f)\par
+\tab\tab\tab\{\par
+\tab\tab\tab\tab _thrusterForce = Vector3.up * thrusterForce;\par
+\tab\tab\tab\tab SetJointSettings(0f);\par
+\tab\tab\tab\}\par
+\tab\tab\} else\par
+\tab\tab\{\par
+\tab\tab\tab thrusterFuelAmount += thrusterFuelRegenSpeed * Time.deltaTime;\par
+\tab\tab\tab SetJointSettings(jointSpring);\par
+\tab\tab\}\par
+\par
+\tab\tab thrusterFuelAmount = Mathf.Clamp(thrusterFuelAmount, 0f, 1f);\par
+\par
+\tab\tab // Apply the thruster force\par
+\tab\tab motor.ApplyThruster(_thrusterForce);\par
+\par
+\tab\}\par
+\par
+\tab private void SetJointSettings (float _jointSpring)\par
+\tab\{\par
+\tab\tab joint.yDrive = new JointDrive \{\par
+\tab\tab\tab positionSpring = _jointSpring,\par
+\tab\tab\tab maximumForce = jointMaxForce\par
+\tab\tab\};\par
+\tab\}\par
+\par
+\}\par
+
+\pard\sa200\sl276\slmult1\f0\fs22\lang9\par
+\ul\b Playermotor.cs:-\par
+
+\pard\tx959\tx1918\tx2877\tx3836\tx4795\tx5754\tx6713\tx7672\tx8631\ulnone\b0\f1\fs20\lang16393 using UnityEngine;\par
+\par
+[RequireComponent(typeof(Rigidbody))]\par
+public class PlayerMotor : MonoBehaviour \{\par
+\par
+\tab [SerializeField]\par
+\tab private Camera cam;\par
+\par
+\tab private Vector3 velocity = Vector3.zero;\par
+\tab private Vector3 rotation = Vector3.zero;\par
+\tab private float cameraRotationX = 0f;\par
+\tab private float currentCameraRotationX = 0f;\par
+\tab private Vector3 thrusterForce = Vector3.zero;\par
+\par
+\tab [SerializeField]\par
+\tab private float cameraRotationLimit = 85f;\par
+\par
+\tab private Rigidbody rb;\par
+\par
+\tab void Start ()\par
+\tab\{\par
+\tab\tab rb = GetComponent<Rigidbody>();\par
+\tab\}\par
+\par
+\tab // Gets a movement vector\par
+\tab public void Move (Vector3 _velocity)\par
+\tab\{\par
+\tab\tab velocity = _velocity;\par
+\tab\}\par
+\par
+\tab // Gets a rotational vector\par
+\tab public void Rotate(Vector3 _rotation)\par
+\tab\{\par
+\tab\tab rotation = _rotation;\par
+\tab\}\par
+\par
+\tab // Gets a rotational vector for the camera\par
+\tab public void RotateCamera(float _cameraRotationX)\par
+\tab\{\par
+\tab\tab cameraRotationX = _cameraRotationX;\par
+\tab\}\par
+\tab\par
+\tab // Get a force vector for our thrusters\par
+\tab public void ApplyThruster (Vector3 _thrusterForce)\par
+\tab\{\par
+\tab\tab thrusterForce = _thrusterForce;\par
+\tab\}\par
+\par
+\tab // Run every physics iteration\par
+\tab void FixedUpdate ()\par
+\tab\{\par
+\tab\tab PerformMovement();\par
+\tab\tab PerformRotation();\par
+\tab\}\par
+\par
+\tab //Perform movement based on velocity variable\par
+\tab void PerformMovement ()\par
+\tab\{\par
+\tab\tab if (velocity != Vector3.zero)\par
+\tab\tab\{\par
+\tab\tab\tab rb.MovePosition(rb.position + velocity * Time.fixedDeltaTime);\par
+\tab\tab\}\par
+\par
+\tab\tab if (thrusterForce != Vector3.zero)\par
+\tab\tab\{\par
+\tab\tab\tab rb.AddForce(thrusterForce * Time.fixedDeltaTime, ForceMode.Acceleration);\par
+\tab\tab\}\par
+\par
+\tab\}\par
+\par
+\tab //Perform rotation\par
+\tab void PerformRotation ()\par
+\tab\{\par
+\tab\tab rb.MoveRotation(rb.rotation * Quaternion.Euler (rotation));\par
+\tab\tab if (cam != null)\par
+\tab\tab\{\par
+\tab\tab\tab // Set our rotation and clamp it\par
+\tab\tab\tab currentCameraRotationX -= cameraRotationX;\par
+\tab\tab\tab currentCameraRotationX = Mathf.Clamp(currentCameraRotationX, -cameraRotationLimit, cameraRotationLimit);\par
+\par
+\tab\tab\tab //Apply our rotation to the transform of our camera\par
+\tab\tab\tab cam.transform.localEulerAngles = new Vector3(currentCameraRotationX, 0f, 0f);\par
+\tab\tab\}\par
+\tab\}\par
+\par
+\}\par
+
+\pard\sa200\sl276\slmult1\f0\fs22\lang9\par
+\ul\b Weaponmanager.cs:-\par
+
+\pard\tx959\tx1918\tx2877\tx3836\tx4795\tx5754\tx6713\tx7672\tx8631\ulnone\b0\f1\fs20\lang16393 using UnityEngine;\par
+\par
+[RequireComponent(typeof(Rigidbody))]\par
+public class PlayerMotor : MonoBehaviour \{\par
+\par
+\tab [SerializeField]\par
+\tab private Camera cam;\par
+\par
+\tab private Vector3 velocity = Vector3.zero;\par
+\tab private Vector3 rotation = Vector3.zero;\par
+\tab private float cameraRotationX = 0f;\par
+\tab private float currentCameraRotationX = 0f;\par
+\tab private Vector3 thrusterForce = Vector3.zero;\par
+\par
+\tab [SerializeField]\par
+\tab private float cameraRotationLimit = 85f;\par
+\par
+\tab private Rigidbody rb;\par
+\par
+\tab void Start ()\par
+\tab\{\par
+\tab\tab rb = GetComponent<Rigidbody>();\par
+\tab\}\par
+\par
+\tab // Gets a movement vector\par
+\tab public void Move (Vector3 _velocity)\par
+\tab\{\par
+\tab\tab velocity = _velocity;\par
+\tab\}\par
+\par
+\tab // Gets a rotational vector\par
+\tab public void Rotate(Vector3 _rotation)\par
+\tab\{\par
+\tab\tab rotation = _rotation;\par
+\tab\}\par
+\par
+\tab // Gets a rotational vector for the camera\par
+\tab public void RotateCamera(float _cameraRotationX)\par
+\tab\{\par
+\tab\tab cameraRotationX = _cameraRotationX;\par
+\tab\}\par
+\tab\par
+\tab // Get a force vector for our thrusters\par
+\tab public void ApplyThruster (Vector3 _thrusterForce)\par
+\tab\{\par
+\tab\tab thrusterForce = _thrusterForce;\par
+\tab\}\par
+\par
+\tab // Run every physics iteration\par
+\tab void FixedUpdate ()\par
+\tab\{\par
+\tab\tab PerformMovement();\par
+\tab\tab PerformRotation();\par
+\tab\}\par
+\par
+\tab //Perform movement based on velocity variable\par
+\tab void PerformMovement ()\par
+\tab\{\par
+\tab\tab if (velocity != Vector3.zero)\par
+\tab\tab\{\par
+\tab\tab\tab rb.MovePosition(rb.position + velocity * Time.fixedDeltaTime);\par
+\tab\tab\}\par
+\par
+\tab\tab if (thrusterForce != Vector3.zero)\par
+\tab\tab\{\par
+\tab\tab\tab rb.AddForce(thrusterForce * Time.fixedDeltaTime, ForceMode.Acceleration);\par
+\tab\tab\}\par
+\par
+\tab\}\par
+\par
+\tab //Perform rotation\par
+\tab void PerformRotation ()\par
+\tab\{\par
+\tab\tab rb.MoveRotation(rb.rotation * Quaternion.Euler (rotation));\par
+\tab\tab if (cam != null)\par
+\tab\tab\{\par
+\tab\tab\tab // Set our rotation and clamp it\par
+\tab\tab\tab currentCameraRotationX -= cameraRotationX;\par
+\tab\tab\tab currentCameraRotationX = Mathf.Clamp(currentCameraRotationX, -cameraRotationLimit, cameraRotationLimit);\par
+\par
+\tab\tab\tab //Apply our rotation to the transform of our camera\par
+\tab\tab\tab cam.transform.localEulerAngles = new Vector3(currentCameraRotationX, 0f, 0f);\par
+\tab\tab\}\par
+\tab\}\par
+\par
+\}\par
+
+\pard\sa200\sl276\slmult1\f0\fs22\lang9\par
+}
+ 
